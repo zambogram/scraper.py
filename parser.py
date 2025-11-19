@@ -12,12 +12,13 @@ logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT)
 logger = logging.getLogger(__name__)
 
 
-def extraer_texto_de_pdf(ruta_pdf):
+def extraer_texto_de_pdf(ruta_pdf, usar_ocr_fallback=True):
     """
     Extrae texto de un archivo PDF.
 
     Args:
         ruta_pdf (str): Ruta al archivo PDF
+        usar_ocr_fallback (bool): Si True, usa OCR si PyPDF2 falla
 
     Returns:
         str: Texto extraído del PDF o None si falla
@@ -40,14 +41,81 @@ def extraer_texto_de_pdf(ruta_pdf):
         texto_final = '\n'.join(texto_completo)
 
         if texto_final.strip():
-            logger.info(f"Texto extraído: {len(texto_final)} caracteres")
+            logger.info(f"Texto extraído con PyPDF2: {len(texto_final)} caracteres")
             return texto_final
         else:
-            logger.warning(f"No se pudo extraer texto del PDF: {ruta_pdf}")
-            return None
+            # PyPDF2 no pudo extraer texto, intentar OCR
+            if usar_ocr_fallback:
+                logger.warning(f"PyPDF2 no extrajo texto. Intentando OCR...")
+                return extraer_texto_pdf_con_ocr(ruta_pdf)
+            else:
+                logger.warning(f"No se pudo extraer texto del PDF: {ruta_pdf}")
+                return None
 
     except Exception as e:
         logger.error(f"Error leyendo PDF {ruta_pdf}: {e}")
+
+        # Intentar OCR como última opción
+        if usar_ocr_fallback:
+            logger.info("Intentando OCR como fallback...")
+            return extraer_texto_pdf_con_ocr(ruta_pdf)
+
+        return None
+
+
+def extraer_texto_pdf_con_ocr(ruta_pdf):
+    """
+    Extrae texto de PDF usando OCR (para PDFs escaneados).
+
+    Requiere: pytesseract, pdf2image, tesseract-ocr instalado en el sistema
+
+    Args:
+        ruta_pdf (str): Ruta al archivo PDF
+
+    Returns:
+        str: Texto extraído o None si falla
+    """
+    try:
+        import pytesseract
+        from pdf2image import convert_from_path
+        from PIL import Image
+
+        logger.info(f"Extrayendo texto con OCR: {ruta_pdf}")
+
+        # Convertir PDF a imágenes
+        imagenes = convert_from_path(ruta_pdf, dpi=300)
+
+        texto_completo = []
+
+        for i, imagen in enumerate(imagenes):
+            try:
+                # Aplicar OCR a cada página
+                texto = pytesseract.image_to_string(imagen, lang='spa')
+                if texto:
+                    texto_completo.append(texto)
+                logger.info(f"OCR página {i+1}/{len(imagenes)}")
+            except Exception as e:
+                logger.warning(f"Error OCR en página {i+1}: {e}")
+                continue
+
+        texto_final = '\n'.join(texto_completo)
+
+        if texto_final.strip():
+            logger.info(f"Texto extraído con OCR: {len(texto_final)} caracteres")
+            return texto_final
+        else:
+            logger.warning("OCR no pudo extraer texto")
+            return None
+
+    except ImportError:
+        logger.warning("pytesseract o pdf2image no están instalados")
+        logger.warning("Para usar OCR, instala:")
+        logger.warning("  pip install pytesseract pdf2image Pillow")
+        logger.warning("  Y también: sudo apt-get install tesseract-ocr tesseract-ocr-spa")
+        return None
+
+    except Exception as e:
+        logger.error(f"Error en OCR: {e}")
         return None
 
 
